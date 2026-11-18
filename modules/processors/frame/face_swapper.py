@@ -1220,8 +1220,8 @@ def process_frames(
         #        update_status(f"Processed frame {i+1}/{total_frames}", NAME)
 
 
-def process_image(source_path: str, target_path: str, output_path: str) -> None:
-    """Processes a single target image."""
+def process_image(source_path: str, target_path: str, output_path: str) -> bool:
+    """Process one image and report whether a changed output was written."""
     # --- Reset interpolation state for single image processing ---
     global PREVIOUS_FRAME_RESULT
     PREVIOUS_FRAME_RESULT = None
@@ -1234,11 +1234,12 @@ def process_image(source_path: str, target_path: str, output_path: str) -> None:
         target_frame = imread_unicode(target_path)
         if target_frame is None:
             update_status(f"Error: Could not read target image: {target_path}", NAME)
-            return
+            return False
     except Exception as read_e:
         update_status(f"Error reading target image {target_path}: {read_e}", NAME)
-        return
+        return False
 
+    original_target = target_frame.copy()
     result = None
     try:
         if use_v2:
@@ -1253,30 +1254,40 @@ def process_image(source_path: str, target_path: str, output_path: str) -> None:
                 source_img = imread_unicode(source_path)
                 if source_img is None:
                     update_status(f"Error: Could not read source image: {source_path}", NAME)
-                    return
+                    return False
                 source_face = get_one_face(source_img)
                 if not source_face:
                     update_status(f"Error: No face found in source image: {source_path}", NAME)
-                    return
+                    return False
             except Exception as src_e:
                  update_status(f"Error reading or analyzing source image {source_path}: {src_e}", NAME)
-                 return
+                 return False
 
             result = process_frame(source_face, target_frame)
 
         # Write the result if processing was successful
         if result is not None:
+            if np.array_equal(result, original_target):
+                update_status(
+                    "Image processing produced no pixel changes; output was not saved.",
+                    NAME,
+                )
+                return False
             write_success = imwrite_unicode(output_path, result)
             if write_success:
                 update_status(f"Output image saved to: {output_path}", NAME)
+                return True
             else:
                 update_status(f"Error: Failed to write output image to {output_path}", NAME)
+                return False
         else:
             # This case might occur if process_frame/v2 returns None unexpectedly
             update_status("Image processing failed (result was None).", NAME)
+            return False
 
     except Exception as proc_e:
          update_status(f"Error during image processing: {proc_e}", NAME)
+         return False
          # import traceback
          # traceback.print_exc()
 

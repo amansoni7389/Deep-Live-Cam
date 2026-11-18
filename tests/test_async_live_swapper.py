@@ -238,5 +238,76 @@ class AsyncLiveSwapperTest(unittest.TestCase):
         self.assertFalse(self.swapper._thread.is_alive())
 
 
+class ImageProcessingResultTest(unittest.TestCase):
+    def test_no_source_face_returns_failure_without_writing(self):
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        with (
+            patch.object(modules.globals, "map_faces", False),
+            patch.object(face_swapper, "imread_unicode", return_value=frame),
+            patch.object(face_swapper, "get_one_face", return_value=None),
+            patch.object(face_swapper, "imwrite_unicode") as write,
+            patch.object(face_swapper, "update_status"),
+        ):
+            succeeded = face_swapper.process_image(
+                "source.png",
+                "target.png",
+                "output.png",
+            )
+
+        self.assertFalse(succeeded)
+        write.assert_not_called()
+
+    def test_unchanged_result_returns_failure_without_writing(self):
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        with (
+            patch.object(modules.globals, "map_faces", False),
+            patch.object(face_swapper, "imread_unicode", return_value=frame),
+            patch.object(face_swapper, "get_one_face", return_value=object()),
+            patch.object(
+                face_swapper,
+                "process_frame",
+                return_value=frame.copy(),
+            ),
+            patch.object(face_swapper, "imwrite_unicode") as write,
+            patch.object(face_swapper, "update_status"),
+        ):
+            succeeded = face_swapper.process_image(
+                "source.png",
+                "target.png",
+                "output.png",
+            )
+
+        self.assertFalse(succeeded)
+        write.assert_not_called()
+
+    def test_in_place_pixel_change_is_reported_as_success(self):
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        def mutate_target(_source_face, target):
+            target[20:40, 20:40] = 255
+            return target
+
+        with (
+            patch.object(modules.globals, "map_faces", False),
+            patch.object(face_swapper, "imread_unicode", return_value=frame),
+            patch.object(face_swapper, "get_one_face", return_value=object()),
+            patch.object(
+                face_swapper,
+                "process_frame",
+                side_effect=mutate_target,
+            ),
+            patch.object(face_swapper, "imwrite_unicode", return_value=True) as write,
+            patch.object(face_swapper, "update_status"),
+        ):
+            succeeded = face_swapper.process_image(
+                "source.png",
+                "target.png",
+                "output.png",
+            )
+
+        self.assertTrue(succeeded)
+        write.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

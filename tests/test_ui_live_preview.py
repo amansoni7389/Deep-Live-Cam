@@ -349,6 +349,27 @@ class RandomFaceDownloadTest(unittest.TestCase):
         with open(target, "rb") as handle:
             self.assertEqual(handle.read(), fresh)
 
+    def test_offline_safe_mode_blocks_network_and_camera_probe(self):
+        stub = type("Stub", (), {})()
+        with (
+            patch.object(ui, "OFFLINE_SAFE_MODE", True),
+            patch.object(
+                ui.requests,
+                "get",
+                side_effect=AssertionError("network access attempted"),
+            ),
+            patch.object(
+                ui.cv2,
+                "VideoCapture",
+                side_effect=AssertionError("camera access attempted"),
+            ),
+        ):
+            ui.MainWindow._on_random_face(stub)
+            indices, names = ui.get_available_cameras()
+
+        self.assertEqual(indices, [])
+        self.assertEqual(names, ["No cameras found"])
+
 
 class AsyncSwapWorkerTest(unittest.TestCase):
     """With async swap on, the worker swaps through AsyncLiveSwapper, keeps

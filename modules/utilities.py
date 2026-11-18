@@ -290,6 +290,9 @@ def is_video(video_path: str) -> bool:
 
 
 def conditional_download(download_directory_path: str, urls: List[str]) -> None:
+    if os.environ.get("DLC_OFFLINE_SAFE_MODE") == "1":
+        print("[DLC.MODELS] Mirror downloads are disabled by offline safe mode.")
+        return
     if not os.path.exists(download_directory_path):
         os.makedirs(download_directory_path)
     for url in urls:

@@ -1,4 +1,5 @@
 import os
+import hashlib
 import ssl
 import threading
 import urllib.error
@@ -11,7 +12,11 @@ from tqdm import tqdm
 from modules.paths import MODELS_DIR
 
 HF_REPO_ID = "hacksider/deep-live-cam"
-HF_RESOLVE_BASE = f"https://huggingface.co/{HF_REPO_ID}/resolve/main/"
+# Immutable Hugging Face repository revision reviewed on 2026-11-18.
+HF_REPO_REVISION = "966b5ea2adc8091d0230c579a09ed541c711de80"
+HF_RESOLVE_BASE = (
+    f"https://huggingface.co/{HF_REPO_ID}/resolve/{HF_REPO_REVISION}/"
+)
 
 MODEL_SIZES: Dict[str, int] = {
     "inswapper_128.onnx": 554253681,
@@ -24,6 +29,19 @@ MODEL_SIZES: Dict[str, int] = {
     "buffalo_l/buffalo_l/det_10g.onnx": 16923827,
     "buffalo_l/buffalo_l/genderage.onnx": 1322532,
     "buffalo_l/buffalo_l/w600k_r50.onnx": 174383860,
+}
+
+MODEL_SHA256: Dict[str, str] = {
+    "inswapper_128.onnx": "e4a3f08c753cb72d04e10aa0f7dbe3deebbf39567d4ead6dce08e98aa49e16af",
+    "inswapper_128_fp16.onnx": "6d51a9278a1f650cffefc18ba53f38bf2769bf4bbff89267822cf72945f8a38b",
+    "gfpgan-1024.onnx": "ee8dd6415e388b3a410689d5d9395a2bf50b5973b588421ebfa57bc266f19e24",
+    "GPEN-BFR-256.onnx": "aa5bd3ab238640a378c59e4a560f7a7150627944cf2129e6311ae4720e833271",
+    "GPEN-BFR-512.onnx": "bf80acb8e91ba8852e3f012505be2c3b6cd6b3eed5ec605e3db87863c4e74d4e",
+    "buffalo_l/buffalo_l/1k3d68.onnx": "df5c06b8a0c12e422b2ed8947b8869faa4105387f199c477af038aa01f9a45cc",
+    "buffalo_l/buffalo_l/2d106det.onnx": "f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf",
+    "buffalo_l/buffalo_l/det_10g.onnx": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+    "buffalo_l/buffalo_l/genderage.onnx": "4fde69b1c810857b88c64a335084f1c3fe8f01246c9a191b48c7bb756d6652fb",
+    "buffalo_l/buffalo_l/w600k_r50.onnx": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
 }
 
 _LOCKS: Dict[str, threading.Lock] = {}
@@ -63,9 +81,27 @@ def expected_size(name: str) -> Optional[int]:
     return MODEL_SIZES.get(name.replace(os.sep, "/"))
 
 
+def expected_sha256(name: str) -> Optional[str]:
+    return MODEL_SHA256.get(name.replace(os.sep, "/"))
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while chunk := handle.read(CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def is_present(name: str, dest_dir: Optional[str] = None) -> bool:
     path = local_path(name, dest_dir)
-    return os.path.isfile(path) and os.path.getsize(path) > 0
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return False
+    size = expected_size(name)
+    if size is not None and os.path.getsize(path) != size:
+        return False
+    digest = expected_sha256(name)
+    return digest is None or sha256_file(path) == digest
 
 
 def _download(name: str, url: str, target: str, size: Optional[int]) -> bool:
@@ -128,6 +164,20 @@ def _download(name: str, url: str, target: str, size: Optional[int]) -> bool:
             pass
         return False
 
+    digest = expected_sha256(name)
+    if digest is not None:
+        actual_digest = sha256_file(partial)
+        if actual_digest != digest:
+            print(
+                f"[DLC.MODELS] {name} SHA-256 is {actual_digest}, "
+                f"expected {digest}. Discarding."
+            )
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
+            return False
+
     try:
         os.replace(partial, target)
     except OSError as error:
@@ -145,6 +195,13 @@ def ensure_model(
     with _lock_for(target):
         if is_present(name, dest_dir):
             return target
+        if os.environ.get("DLC_OFFLINE_SAFE_MODE") == "1":
+            if not quiet:
+                print(
+                    f"[DLC.MODELS] {name} is missing; automatic downloads are "
+                    "disabled by offline safe mode."
+                )
+            return None
         if not quiet:
             print(f"[DLC.MODELS] {name} not found in models folder, downloading...")
         if _download(name, resolve_url(name), target, expected_size(name)):
