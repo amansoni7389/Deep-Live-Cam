@@ -133,5 +133,54 @@ class MapFacesFallbackTests(unittest.TestCase):
         self.assertNotIn(("process_video", "source.jpg", ("target.mp4/0001.png",)), calls)
 
 
+class ImageSuccessReportingTests(unittest.TestCase):
+    def test_failed_processor_removes_copied_output_and_reports_failure(self):
+        calls = []
+
+        class FailedProcessor:
+            NAME = "failed_processor"
+
+            def pre_start(self):
+                return True
+
+            def process_image(self, *_args):
+                return False
+
+        with _patched_core_import_stubs(calls) as core:
+            core.modules.globals.source_path = "source.png"
+            core.modules.globals.target_path = "target.png"
+            core.modules.globals.output_path = "output.png"
+            core.modules.globals.frame_processors = ["face_swapper"]
+            core.modules.globals.nsfw_filter = False
+            core.modules.globals.execution_providers = ["CPUExecutionProvider"]
+            statuses = []
+
+            with (
+                patch.object(core, "has_image_extension", return_value=True),
+                patch.object(core, "is_image", return_value=True),
+                patch.object(
+                    core,
+                    "get_frame_processors_modules",
+                    return_value=[FailedProcessor()],
+                ),
+                patch.object(core.shutil, "copy2"),
+                patch.object(core.os.path, "isfile", return_value=True),
+                patch.object(core.os, "remove") as remove,
+                patch.object(
+                    core,
+                    "update_status",
+                    side_effect=lambda message, *_args: statuses.append(message),
+                ),
+            ):
+                core.start()
+
+        remove.assert_called_once_with("output.png")
+        self.assertIn("Processing to image failed!", statuses)
+        self.assertFalse(
+            any("succeed" in message for message in statuses),
+            statuses,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

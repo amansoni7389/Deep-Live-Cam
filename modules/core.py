@@ -233,14 +233,26 @@ def start() -> None:
             shutil.copy2(modules.globals.target_path, modules.globals.output_path)
         except Exception as e:
             print("Error copying file:", str(e))
+            update_status('Processing to image failed!')
+            return
+        processing_succeeded = True
         for frame_processor in get_frame_processors_modules(modules.globals.frame_processors):
             update_status('Progressing...', frame_processor.NAME)
-            frame_processor.process_image(modules.globals.source_path, modules.globals.output_path, modules.globals.output_path)
+            result = frame_processor.process_image(
+                modules.globals.source_path,
+                modules.globals.output_path,
+                modules.globals.output_path,
+            )
             release_resources()
-        if is_image(modules.globals.target_path):
+            if result is False:
+                processing_succeeded = False
+                break
+        if processing_succeeded and is_image(modules.globals.output_path):
             elapsed = time.time() - start_time
             update_status(f'Processing to image succeed! (Time: {elapsed:.2f}s)')
         else:
+            if os.path.isfile(modules.globals.output_path):
+                os.remove(modules.globals.output_path)
             update_status('Processing to image failed!')
         return
     
