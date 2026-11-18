@@ -105,6 +105,7 @@ POPUP_LIVE_SCROLL_HEIGHT = 700
 
 MAPPER_PREVIEW_SIZE = 100
 SOURCE_TARGET_PREVIEW_SIZE = 200
+OFFLINE_SAFE_MODE = os.environ.get("DLC_OFFLINE_SAFE_MODE") == "1"
 
 
 # ─── modern dark stylesheet ───────────────────────────────────────────────
@@ -435,6 +436,9 @@ def check_and_ignore_nsfw(target, destroy: Optional[Callable] = None) -> bool:
 
 
 def get_available_cameras() -> Tuple[List[int], List[str]]:
+    if OFFLINE_SAFE_MODE:
+        return [], ["No cameras found"]
+
     if platform.system() == "Windows":
         try:
             graph = FilterGraph()
@@ -540,8 +544,11 @@ class MainWindow(QMainWindow):
         footer = QLabel("Deep Live Cam")
         footer.setObjectName("linkLabel")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setCursor(Qt.CursorShape.PointingHandCursor)
-        footer.mousePressEvent = lambda _e: webbrowser.open("https://deeplivecam.net")
+        if not OFFLINE_SAFE_MODE:
+            footer.setCursor(Qt.CursorShape.PointingHandCursor)
+            footer.mousePressEvent = lambda _e: webbrowser.open(
+                "https://deeplivecam.net"
+            )
         layout.addWidget(footer)
 
     # ── image row ────────────────────────────────────────────────────────
@@ -566,6 +573,9 @@ class MainWindow(QMainWindow):
         self.btn_random_face.setToolTip(
             _("Get a random face from thispersondoesnotexist.com")
         )
+        if OFFLINE_SAFE_MODE:
+            self.btn_random_face.setEnabled(False)
+            self.btn_random_face.setToolTip(_("Disabled by offline safe mode"))
         self.btn_random_face.clicked.connect(self._on_random_face)
         src_row.addWidget(self.btn_select_source)
         src_row.addWidget(self.btn_random_face)
@@ -910,6 +920,9 @@ class MainWindow(QMainWindow):
             self.target_label.setText(_("Target"))
 
     def _on_random_face(self) -> None:
+        if OFFLINE_SAFE_MODE:
+            update_status("Network access is disabled by offline safe mode")
+            return
         if _PREVIEW is not None:
             _PREVIEW.hide()
         try:
